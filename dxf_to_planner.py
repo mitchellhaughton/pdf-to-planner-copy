@@ -198,10 +198,11 @@ def build_blueprint_from_loops(loops, meters_per_unit: float) -> dict:
             x2, y2 = pts[(i + 1) % n]  # last edge closes back to start
             idx = len(lines)
             lines.append({
-                # NOTE: DXF Y is up (CAD convention). Mapped straight to planner Z.
-                # If the plan renders mirrored top-to-bottom, negate the z terms.
-                "start": {"x": round((x1 - min_x) * s, 4), "y": GROUND_Y, "z": round((y1 - min_y) * s, 4)},
-                "end":   {"x": round((x2 - min_x) * s, 4), "y": GROUND_Y, "z": round((y2 - min_y) * s, 4)},
+                # DXF Y is up (CAD convention) but the planner's top-down view
+                # renders +z downward on screen, so map z = (max_y - y) to keep
+                # the plan upright instead of mirrored top-to-bottom.
+                "start": {"x": round((x1 - min_x) * s, 4), "y": GROUND_Y, "z": round((max_y - y1) * s, 4)},
+                "end":   {"x": round((x2 - min_x) * s, 4), "y": GROUND_Y, "z": round((max_y - y2) * s, 4)},
                 "thickness": 0.05,
             })
             loop_indices.append(idx)

@@ -77,10 +77,15 @@ spline-based DXF (heart/paws clipart, mm units, 6 closed loops) — rendered fla
 & smooth in the planner, confirming the full DXF→planner chain incl. SPLINE
 flattening. (Note: `--all-loops` fills every loop as a separate floor face;
 default single-largest-loop mode is the right choice for a site boundary.)
-NOT yet tested on a real architectural site-plan DXF — NOTE/TODO markers flag branches to verify: which entity
-types actually carry the boundary, real layer names, and whether DXF Y needs
-flipping (negate z) so the plan isn't mirrored. `make_test_dxf.py` regenerates
-the smoke-test fixture.
+✅ Y-FLIP RESOLVED: DXF is Y-up but the planner renders +z downward, so the plan
+came in mirrored top-to-bottom. Fixed by mapping z = (max_y - y). Confirmed with
+a 4-shape test DXF (pentagon/diamond/hexagon/point-down gem) — orientation now
+matches the source. `make_four_shapes.py` regenerates it; `diagnose_loop.py`
+checks that flattened loops are clean ordered rings (no jump/closing-chord).
+
+Remaining DXF unknowns (only verifiable on a real architectural DXF): which
+entity types actually carry the boundary, and real layer names.
+`make_test_dxf.py` regenerates the rectangle smoke-test fixture.
 
 ## ✅ Coordinate-plane bug FIXED + planner format confirmed (2026-06-17)
 
