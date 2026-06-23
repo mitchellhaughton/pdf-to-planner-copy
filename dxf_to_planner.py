@@ -14,18 +14,19 @@ route (vector_to_planner.py), a DXF carries:
   - the site boundary as a single CLOSED polyline, so there's no stitching.
 
 Usage:
-  uv run dxf_to_planner.py "site.dxf"                  # auto: largest closed loop
-  uv run dxf_to_planner.py "site.dxf" --layer C-PROP   # only entities on a layer
-  uv run dxf_to_planner.py "site.dxf" --all-loops      # every closed polyline
-  uv run dxf_to_planner.py "site.dxf" --units feet     # override if DXF is unitless
+  uv run dxf_to_planner.py "site.dxf" --list-layers     # inspect layers first
+  uv run dxf_to_planner.py "site.dxf"                    # auto: largest closed loop
+  uv run dxf_to_planner.py "site.dxf" --layer L-SITE-CONC  # only entities on a layer
+  uv run dxf_to_planner.py "site.dxf" --all-loops        # every closed polyline
+  uv run dxf_to_planner.py "site.dxf" --units feet       # override if DXF is unitless
 
 Outputs the same BlueprintJSON + console-inject script as the PDF tool, reusing
 its inject/clipboard/browser plumbing.
 
-STATUS: sketch — structure is complete and should run, but a few branches are
-marked NOTE/TODO to verify against a real DXF (entity types present, layer names,
-whether Y needs flipping, units header). We can't validate end-to-end until we
-have a file.
+Validated on synthetic + real DXFs (feet/inch/mm/m, polyline/spline/circle).
+Real architectural files often XREF the survey/boundary into separate files, so
+an exported DXF may only contain the host drawing's own geometry — run
+--list-layers first to see what's actually present.
 """
 
 import argparse
@@ -44,6 +45,11 @@ GROUND_Y = 0.01
 
 # Snap/close tolerance in meters for treating a polyline as closed.
 CLOSE_TOL_M = 0.05
+
+# Merge tolerance in meters: consecutive vertices closer than this are collapsed.
+# Real CAD polylines accumulate doubled points and tiny fillet remnants that show
+# up as degenerate 0' 00" sides in the planner; this removes them.
+MERGE_TOL_M = 0.02
 
 # DXF $INSUNITS header code → meters per drawing unit. Only the common ones; the
 # rest warn and fall back to --units / unitless.
@@ -127,6 +133,24 @@ def is_closed_entity(entity, pts: list[tuple[float, float]]) -> bool:
     return False
 
 
+def clean_ring(pts, tol):
+    """
+    Drop consecutive near-coincident vertices (CAD junk: doubled points, tiny
+    fillet remnants) so degenerate ~0-length sides don't reach the planner.
+    tol is in the same units as pts.
+    """
+    if not pts:
+        return pts
+    out = [pts[0]]
+    for p in pts[1:]:
+        if math.dist(p, out[-1]) > tol:
+            out.append(p)
+    # collapse the wrap-around edge if the ring's last point ~= first
+    while len(out) > 1 and math.dist(out[0], out[-1]) <= tol:
+        out.pop()
+    return out
+
+
 def polygon_area(pts: list[tuple[float, float]]) -> float:
     """Shoelace area (drawing units²), absolute value."""
     a = 0.0
@@ -138,14 +162,16 @@ def polygon_area(pts: list[tuple[float, float]]) -> float:
     return abs(a) / 2.0
 
 
-def collect_loops(doc, layer: str | None, flatten_tol_units: float):
+def collect_loops(doc, layer: str | None, flatten_tol_units: float,
+                  merge_tol_units: float = 0.0):
     """
     Return a list of closed loops, each a list of (x, y) points in drawing units.
     Targets LWPOLYLINE/POLYLINE (what a 'closed polyline' export produces);
     CIRCLE/ELLIPSE/SPLINE also flatten fine if present.
+
+    merge_tol_units: collapse consecutive vertices closer than this (CAD junk).
     """
     msp = doc.modelspace()
-    # NOTE: confirm against the real file which types carry the boundary.
     wanted = ("LWPOLYLINE", "POLYLINE", "CIRCLE", "ELLIPSE", "SPLINE")
     query = " ".join(wanted)
     loops = []
@@ -162,6 +188,11 @@ def collect_loops(doc, layer: str | None, flatten_tol_units: float):
         # Ensure the ring doesn't duplicate the closing point.
         if len(pts) >= 2 and pts[0] == pts[-1]:
             pts = pts[:-1]
+        # Drop degenerate near-coincident vertices (e.g. 0' 00" sides).
+        if merge_tol_units > 0:
+            pts = clean_ring(pts, merge_tol_units)
+        if len(pts) < 3:
+            continue
         loops.append({"entity": e.dxftype(), "layer": e.dxf.layer, "pts": pts})
     return loops
 
@@ -212,9 +243,39 @@ def build_blueprint_from_loops(loops, meters_per_unit: float) -> dict:
     return {"lines": lines, "floor": floor}
 
 
+def list_layers(doc, meters_per_unit: float, flatten_tol_units: float):
+    """Print every layer carrying modelspace geometry, with entity types and
+    closed-loop areas (m2), so the right --layer is easy to pick."""
+    from collections import defaultdict
+
+    declared = sorted(l.dxf.name for l in doc.layers)
+    print(f"Declared layers: {len(declared)} (showing only those with geometry below)\n")
+
+    per_layer = defaultdict(lambda: {"types": defaultdict(int), "areas": []})
+    for e in doc.modelspace():
+        info = per_layer[e.dxf.layer]
+        et = e.dxftype()
+        info["types"][et] += 1
+        if et in ("LWPOLYLINE", "POLYLINE", "CIRCLE", "ELLIPSE", "SPLINE"):
+            pts = entity_to_points(e, flatten_tol_units)
+            if len(pts) >= 3 and (et in ("CIRCLE", "ELLIPSE") or is_closed_entity(e, pts)):
+                info["areas"].append(polygon_area(pts) * (meters_per_unit ** 2))
+
+    print(f"{'layer':<24} {'entities':<34} closed loops (m2, biggest first)")
+    print("-" * 92)
+    for lay in sorted(per_layer):
+        info = per_layer[lay]
+        types = ", ".join(f"{t}x{n}" for t, n in sorted(info["types"].items()))
+        areas = sorted(info["areas"], reverse=True)
+        areas_str = ", ".join(f"{a:.3g}" for a in areas[:6]) if areas else "(none)"
+        print(f"{lay:<24} {types[:34]:<34} {areas_str}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Convert a DXF site plan to Landscape Forms Planner")
     ap.add_argument("dxf_path", help="Path to the DXF file")
+    ap.add_argument("--list-layers", action="store_true",
+                    help="List layers with their entity types and closed-loop areas, then exit")
     ap.add_argument("--layer", help="Only use entities on this layer (e.g. the property-line layer)")
     ap.add_argument("--units", help="Override units if the DXF is unitless: feet, inches, mm, cm, m, ...")
     ap.add_argument("--all-loops", action="store_true",
@@ -244,7 +305,12 @@ def main():
     # Tessellation tolerance must be expressed in drawing units.
     flatten_tol_units = (args.flatten_mm / 1000.0) / meters_per_unit
 
-    loops = collect_loops(doc, args.layer, flatten_tol_units)
+    if args.list_layers:
+        list_layers(doc, meters_per_unit, flatten_tol_units)
+        return
+
+    merge_tol_units = MERGE_TOL_M / meters_per_unit
+    loops = collect_loops(doc, args.layer, flatten_tol_units, merge_tol_units)
     print(f"Closed loops found: {len(loops)}"
           + (f" on layer '{args.layer}'" if args.layer else ""))
     if not loops:

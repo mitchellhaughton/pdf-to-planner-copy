@@ -83,9 +83,37 @@ a 4-shape test DXF (pentagon/diamond/hexagon/point-down gem) — orientation now
 matches the source. `make_four_shapes.py` regenerates it; `diagnose_loop.py`
 checks that flattened loops are clean ordered rings (no jump/closing-chord).
 
-Remaining DXF unknowns (only verifiable on a real architectural DXF): which
-entity types actually carry the boundary, and real layer names.
 `make_test_dxf.py` regenerates the rectangle smoke-test fixture.
+
+### Real architectural DXFs tested (2026-06-17)
+Two real files (`DXF Example-1/2.dxf` in Downloads) exercised the pipeline:
+
+- **Example-1** — real Landscape Forms LANDSCAPE site plan, units FEET. ~279
+  declared layers, but most are **XREF layers** (names with a `|` pipe, e.g.
+  `25J1S-PR-FN|...`, `25J1W-Survey|...`) whose geometry lives in *external files
+  we don't have*. So the property boundary (`V-PROP-*`, `K-SURF-BNDY`) is NOT in
+  this export. The directly-drawable closed geometry is the **`L-SITE-CONC`**
+  concrete paving (8 closed loops, 85/72/46/41 m²). That injected and rendered
+  flat & clean at correct scale. **Takeaway: ask the author to BIND/flatten
+  XREFs before exporting**, else the boundary/building won't be present.
+- **Example-2** — architectural BUILDING floor plan, units INCHES. Walls are
+  individual `LINE` entities (1752 on A-WALL), not closed polylines; only closed
+  loops are detail-bubble circles on `A-DETL`. The closed-loop approach finds
+  nothing useful here → this is the case the PDF **wall-stitching** path (task
+  #4) is for. If site plans arrive as line-work rather than closed polylines,
+  that stitching work becomes worth doing.
+
+### Added from real-data lessons
+- **`--list-layers`** — built-in layer inspector (entity types + closed-loop
+  areas per layer); run it first on any real file. (Replaced the throwaway
+  `diagnose_layers.py`.)
+- **Vertex cleanup** (`clean_ring`, `MERGE_TOL_M=0.02`) — collapses
+  near-coincident vertices so degenerate `0' 00"` sides (CAD doubled points /
+  fillet remnants) don't reach the planner. Conservative: removes true
+  duplicates, preserves real short sides (~20cm paving jogs survive).
+- Confirmed: when `--all-loops` injects many adjacent paving areas, neighbors'
+  outlines draw across each other's fills — that's faithful, not a bug (verified
+  by injecting a single loop = clean fill).
 
 ## ✅ Coordinate-plane bug FIXED + planner format confirmed (2026-06-17)
 
