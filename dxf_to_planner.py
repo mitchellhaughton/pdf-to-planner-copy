@@ -152,6 +152,40 @@ def clean_ring(pts, tol):
     return out
 
 
+def _perp_dist(p, a, b):
+    """Perpendicular distance from point p to the line through a, b."""
+    (px, py), (ax, ay), (bx, by) = p, a, b
+    dx, dy = bx - ax, by - ay
+    seg = math.hypot(dx, dy)
+    if seg < 1e-12:
+        return math.dist(p, a)
+    # |cross product| / |segment|
+    return abs(dx * (ay - py) - (ax - px) * dy) / seg
+
+
+def rdp(points, eps):
+    """
+    Ramer-Douglas-Peucker simplification of an open point sequence: drop vertices
+    that lie within eps of the line between kept neighbours. Collapses redundant
+    arc-flattening points and tiny jogs into the essential corners while keeping
+    the overall shape. (Applied to a ring's point list; the closing edge between
+    last and first is left intact.)
+    """
+    if len(points) < 3:
+        return points
+    a, b = points[0], points[-1]
+    dmax, idx = -1.0, 0
+    for i in range(1, len(points) - 1):
+        d = _perp_dist(points[i], a, b)
+        if d > dmax:
+            dmax, idx = d, i
+    if dmax > eps:
+        left = rdp(points[:idx + 1], eps)
+        right = rdp(points[idx:], eps)
+        return left[:-1] + right
+    return [a, b]
+
+
 def polygon_area(pts: list[tuple[float, float]]) -> float:
     """Shoelace area (drawing units²), absolute value."""
     a = 0.0
@@ -360,6 +394,9 @@ def main():
                     help="Drop closed loops below this area in m2 (noise filter)")
     ap.add_argument("--flatten-mm", type=float, default=50.0, metavar="MM",
                     help="Max chord error when tessellating arcs/splines (default 50mm)")
+    ap.add_argument("--simplify", type=float, default=0.0, metavar="MM",
+                    help="Simplify loops (Douglas-Peucker), collapsing redundant vertices "
+                    "within this deviation. Fewer corners/dimension tags. Try 150.")
     ap.add_argument("--output", help="Save BlueprintJSON to this file")
     ap.add_argument("--no-browser", action="store_true", help="Don't open the planner URL")
     args = ap.parse_args()
@@ -423,6 +460,14 @@ def main():
         loops = loops[:1]  # the largest closed loop = the site boundary
         print(f"Using largest loop only: {loops[0]['area_m2']:.4g} m2 "
               f"({loops[0]['entity']} on '{loops[0]['layer']}')")
+
+    if args.simplify > 0:
+        eps_units = (args.simplify / 1000.0) / meters_per_unit
+        before = sum(len(lp["pts"]) for lp in loops)
+        for lp in loops:
+            lp["pts"] = rdp(lp["pts"], eps_units)
+        after = sum(len(lp["pts"]) for lp in loops)
+        print(f"Simplified --simplify {args.simplify}mm: {before} -> {after} vertices")
 
     blueprint = build_blueprint_from_loops(loops, meters_per_unit)
 

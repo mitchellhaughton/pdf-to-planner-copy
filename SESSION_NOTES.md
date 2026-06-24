@@ -117,6 +117,15 @@ building walls) may need smarter routing later. Units header was wrong
 ($INSUNITS=1/inches) — geometry is feet; used `--units feet`. Tell author to fix
 the unit stamp and, ideally, export real CLOSED polylines.
 
+**`--simplify MM` (Douglas-Peucker):** arc flattening produced 242 vertices →
+the planner labels every side, swarming the view with `0' 01"` dimension tags.
+RDP collapses redundant collinear/arc points into the real corners. For this
+boundary: `--simplify 100` → 242→17 vertices, extent 12.02×15.11m (vs 12.07×15.22
+unsimplified — ~5cm deviation). `150`→14, `300`→10 (starts losing shape).
+Recommended default 100mm. Note: the `Side N` tags are the PLANNER's per-side
+labels — simplify reduces how many sides exist (the lever we control); fully
+hiding labels would be a planner display toggle.
+
 ### Added from real-data lessons
 - **`--list-layers`** — built-in layer inspector (entity types + closed-loop
   areas per layer); run it first on any real file. (Replaced the throwaway
