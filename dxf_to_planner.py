@@ -18,7 +18,8 @@ Usage:
   uv run dxf_to_planner.py "site.dxf"                    # auto: largest closed loop
   uv run dxf_to_planner.py "site.dxf" --layer L-SITE-CONC  # only entities on a layer
   uv run dxf_to_planner.py "site.dxf" --all-loops        # every closed polyline
-  uv run dxf_to_planner.py "site.dxf" --units feet       # override if DXF is unitless
+  uv run dxf_to_planner.py "site.dxf" --stitch           # assemble open edges into loops
+  uv run dxf_to_planner.py "site.dxf" --units feet       # override units
 
 Outputs the same BlueprintJSON + console-inject script as the PDF tool, reusing
 its inject/clipboard/browser plumbing.
@@ -197,6 +198,78 @@ def collect_loops(doc, layer: str | None, flatten_tol_units: float,
     return loops
 
 
+def collect_open_pieces(doc, layer, flatten_tol_units):
+    """
+    Return open (non-closed) segment chains as point-lists in drawing units.
+    Includes LINE/ARC and open polylines — the raw pieces that real exports use
+    when a boundary is stored as separate edges rather than one closed polyline.
+    """
+    msp = doc.modelspace()
+    pieces = []
+    for e in msp.query("LWPOLYLINE POLYLINE LINE ARC"):
+        if layer and e.dxf.layer != layer:
+            continue
+        if e.dxftype() == "LINE":
+            pts = [(e.dxf.start.x, e.dxf.start.y), (e.dxf.end.x, e.dxf.end.y)]
+        else:
+            pts = entity_to_points(e, flatten_tol_units)
+            # skip pieces that are already closed rings on their own
+            if len(pts) >= 4 and is_closed_entity(e, pts):
+                continue
+        if len(pts) >= 2:
+            pieces.append(pts)
+    return pieces
+
+
+def stitch_loops(pieces, tol_units):
+    """
+    Walk shared endpoints to assemble open chains into closed loops.
+    Greedy: start a chain, keep appending an unused piece whose endpoint meets
+    the chain's tail (reversing it if needed) until the chain returns to its
+    start. Each returned loop is a list of (x, y) points (drawing units).
+    Pieces that don't close are dropped (and reported by the caller).
+    """
+    from collections import defaultdict
+
+    def key(p):
+        return (round(p[0] / tol_units), round(p[1] / tol_units))
+
+    adj = defaultdict(list)  # endpoint key -> [piece index]
+    for i, pts in enumerate(pieces):
+        adj[key(pts[0])].append(i)
+        adj[key(pts[-1])].append(i)
+
+    used = [False] * len(pieces)
+    loops, open_chains = [], 0
+
+    for start in range(len(pieces)):
+        if used[start]:
+            continue
+        chain = list(pieces[start])
+        used[start] = True
+        closed = False
+        while True:
+            if key(chain[-1]) == key(chain[0]) and len(chain) > 2:
+                closed = True
+                break
+            tail = key(chain[-1])
+            nxt = next((j for j in adj[tail] if not used[j]), None)
+            if nxt is None:
+                break
+            jpts = pieces[nxt]
+            seg = jpts if key(jpts[0]) == tail else jpts[::-1]
+            chain.extend(seg[1:])  # skip the shared joining vertex
+            used[nxt] = True
+        if closed:
+            if key(chain[0]) == key(chain[-1]):
+                chain = chain[:-1]  # drop duplicate closing point
+            loops.append(chain)
+        else:
+            open_chains += 1
+
+    return loops, open_chains
+
+
 def build_blueprint_from_loops(loops, meters_per_unit: float) -> dict:
     """
     Convert closed loops (drawing-unit points) into BlueprintJSON.
@@ -280,6 +353,9 @@ def main():
     ap.add_argument("--units", help="Override units if the DXF is unitless: feet, inches, mm, cm, m, ...")
     ap.add_argument("--all-loops", action="store_true",
                     help="Keep every closed polyline (default: only the largest = site boundary)")
+    ap.add_argument("--stitch", action="store_true",
+                    help="Assemble OPEN segments (LINE/ARC/open polylines) into closed loops "
+                    "by walking shared endpoints. Use when a boundary is stored as separate edges.")
     ap.add_argument("--min-area", type=float, default=0.0, metavar="SQMETERS",
                     help="Drop closed loops below this area in m2 (noise filter)")
     ap.add_argument("--flatten-mm", type=float, default=50.0, metavar="MM",
@@ -310,11 +386,26 @@ def main():
         return
 
     merge_tol_units = MERGE_TOL_M / meters_per_unit
-    loops = collect_loops(doc, args.layer, flatten_tol_units, merge_tol_units)
-    print(f"Closed loops found: {len(loops)}"
-          + (f" on layer '{args.layer}'" if args.layer else ""))
+
+    if args.stitch:
+        pieces = collect_open_pieces(doc, args.layer, flatten_tol_units)
+        print(f"Open pieces found: {len(pieces)}"
+              + (f" on layer '{args.layer}'" if args.layer else ""))
+        stitched, leftover = stitch_loops(pieces, merge_tol_units)
+        print(f"Stitched into {len(stitched)} closed loop(s); {leftover} chain(s) didn't close")
+        loops = []
+        for pts in stitched:
+            pts = clean_ring(pts, merge_tol_units)
+            if len(pts) >= 3:
+                loops.append({"entity": "STITCHED", "layer": args.layer or "(mixed)", "pts": pts})
+    else:
+        loops = collect_loops(doc, args.layer, flatten_tol_units, merge_tol_units)
+        print(f"Closed loops found: {len(loops)}"
+              + (f" on layer '{args.layer}'" if args.layer else ""))
+
     if not loops:
-        print("No closed loops found. Try --layer <name>, or check the DXF has a closed polyline.")
+        print("No usable loops. Try --layer <name>, --stitch (assemble open edges), "
+              "or check the DXF.")
         sys.exit(1)
 
     # Area annotate + filter (convert unit² → m²).

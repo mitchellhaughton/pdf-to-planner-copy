@@ -103,6 +103,20 @@ Two real files (`DXF Example-1/2.dxf` in Downloads) exercised the pipeline:
   #4) is for. If site plans arrive as line-work rather than closed polylines,
   that stitching work becomes worth doing.
 
+### ✅ Stitching added (`--stitch`) — task #4, 2026-06-17
+A 3rd real file (`DXF Example-1-closed-loop-only.dxf`) was the author's attempt
+at "closed loop only", but it actually contained 12 OPEN pieces (6 straight
+LINE-style + 6 flattened arcs), `is_closed=False` on all. Endpoint analysis:
+every endpoint shared by exactly 2 entities, 0 dangling, 0 odd-degree → they tile
+perfectly into closed rings. Built `--stitch`: `collect_open_pieces` +
+`stitch_loops` (greedy walk of shared endpoints, reversing pieces as needed,
+closing when the chain returns to start). Stitched the 12 pieces into 1 loop =
+**84.99 m², 12.07×15.22 m — matches the original's 84.95 m² / 12.06×15.21 m**.
+Caveats: greedy walk assumes degree-2 nodes (clean loops); T-junctions (e.g.
+building walls) may need smarter routing later. Units header was wrong
+($INSUNITS=1/inches) — geometry is feet; used `--units feet`. Tell author to fix
+the unit stamp and, ideally, export real CLOSED polylines.
+
 ### Added from real-data lessons
 - **`--list-layers`** — built-in layer inspector (entity types + closed-loop
   areas per layer); run it first on any real file. (Replaced the throwaway
