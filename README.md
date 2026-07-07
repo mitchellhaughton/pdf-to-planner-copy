@@ -1,20 +1,16 @@
-# PDF Floor Plan → Landscape Forms Planner
+# DXF Site Plan → Landscape Forms Planner
 
-Convert a PDF floor plan into [Landscape Forms Planner](https://landscapeforms.planneren.dev/?family=site-planner) using Claude AI vision.
+Convert a **DXF** site plan into the
+[Landscape Forms Planner](https://landscapeforms.planneren.dev/?family=site-planner),
+deterministically. [`dxf_to_planner.py`](dxf_to_planner.py) reads the real
+geometry and units straight from the DXF — no vision model, no guessing, no API
+key.
 
-## How it works
+It's a single self-contained script. The only requirement is
+[uv](https://docs.astral.sh/uv/), which installs its dependency (`ezdxf`)
+automatically on first run.
 
-1. Renders your PDF floor plan to an image
-2. Sends it to Claude claude-opus-4-8 to extract walls and boundaries as `BlueprintJSON`
-3. Opens the planner in your browser and auto-injects the floor plan
-
-## DXF site plans (recommended, deterministic — no API key needed)
-
-If you have the site plan as a **DXF**, use [`dxf_to_planner.py`](dxf_to_planner.py)
-instead. It reads the real geometry and units directly — no vision model, no
-guessing, no Anthropic key. It's a single self-contained file; the only
-requirement is [uv](https://docs.astral.sh/uv/), which installs its dependency
-(ezdxf) automatically on first run.
+## Usage
 
 ```bash
 # 1. See what layers/geometry the file contains:
@@ -25,10 +21,11 @@ uv run dxf_to_planner.py "site.dxf" --layer L-SITE-CONC --simplify 100
 ```
 
 Then open the [planner](https://landscapeforms.planneren.dev/?family=site-planner)
-in Chrome, press F12 → Console, paste (Ctrl/Cmd+V), Enter. (If Chrome blocks it,
-type `allow pasting` first.) The plan loads in the top-down Plan View.
+in Chrome, press **F12 → Console**, paste (Ctrl/Cmd+V), and press Enter. (If
+Chrome blocks the paste, type `allow pasting` first.) The plan loads in the
+top-down Plan View.
 
-Useful flags:
+## Options
 
 | Flag | What it does |
 |---|---|
@@ -37,47 +34,28 @@ Useful flags:
 | `--all-loops` | Keep every closed loop (default: just the largest) |
 | `--stitch` | Assemble open edges (line/arc) into closed loops |
 | `--units feet` | Override units if the DXF header is missing/wrong |
-| `--simplify 100` | Thin dense vertices (mm) → fewer dimension tags |
+| `--simplify 100` | Thin dense vertices (mm of deviation) → fewer dimension tags |
+| `--min-area SQM` | Drop closed loops smaller than this (noise filter) |
 | `--output out.json` | Also save the raw BlueprintJSON |
+| `--no-browser` | Don't open the planner URL automatically |
 
 Run `uv run dxf_to_planner.py --help` for the full list.
 
-## Requirements (PDF + vision path below)
+## Tips
 
-- [uv](https://docs.astral.sh/uv/) — Python package runner
-- An [Anthropic API key](https://console.anthropic.com/settings/api-keys)
-
-## Setup
-
-Install uv (one-time):
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Set your API key (add to `~/.zshrc` to make it permanent):
-```bash
-export ANTHROPIC_API_KEY=sk-ant-your-key-here
-```
-
-## Usage
-
-```bash
-uv run pdf-to-planner.py "path/to/floor-plan.pdf"
-```
-
-Then paste the copied script into the browser DevTools console (Cmd+Option+J → Console) and press Enter. The floor plan loads automatically.
-
-### Options
-
-```
---page 0        # Which PDF page to use (0-based, default: first)
---scale 1.0     # Multiply all coordinates by this factor (tweak if sizing is off)
---output out.json  # Also save the raw BlueprintJSON to a file
-```
+- **Run `--list-layers` first.** Real architectural files often XREF the
+  survey/boundary into separate files, so an export may only contain the host
+  drawing's own geometry. If the boundary layer is empty, ask for a DXF with
+  XREFs **bound/flattened**.
+- **Check the units.** If the plan comes in the wrong size, the DXF's unit header
+  may be missing or wrong — override with `--units feet` (or `inches`, `mm`, …).
+- **Boundary stored as separate edges?** Add `--stitch` to assemble open
+  line/arc segments into closed loops.
 
 ## BlueprintJSON format
 
-All coordinates are in meters.
+The planner ingests `BlueprintJSON` (injected via the browser console). All
+coordinates are in meters; the ground plane is X-Z with Y up (three.js).
 
 ```typescript
 type BlueprintJSON = {
@@ -93,3 +71,16 @@ type BlueprintJSON = {
   }>
 }
 ```
+
+## Helper scripts
+
+- [`make_four_shapes.py`](make_four_shapes.py) / [`make_test_dxf.py`](make_test_dxf.py) — generate small test DXFs.
+- [`diagnose_loop.py`](diagnose_loop.py) — check that a DXF's loops are clean ordered rings.
+
+---
+
+_Note: this project originally explored a PDF → planner path (Claude vision, then
+deterministic vector extraction). That route was dropped in favor of DXF. The
+history lives in [SESSION_NOTES.md](SESSION_NOTES.md) and
+[CLEAN_INPUT_PLAN.md](CLEAN_INPUT_PLAN.md) for reference only — those documents
+are historical and do not describe the current tool._

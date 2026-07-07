@@ -1,5 +1,12 @@
 # Session Notes: Vector Pipeline Progress
 
+> ⚠️ **HISTORICAL — not the current tool.** These notes document the abandoned
+> PDF → planner exploration (vision, then deterministic PDF vector extraction via
+> `vector_to_planner.py`). That code has been REMOVED. The project now uses the
+> **DXF path only** (`dxf_to_planner.py`); see [README.md](README.md). Kept for
+> reference/history. The DXF-specific findings later in this file (units,
+> stitching, `--simplify`, XREFs) still apply to `dxf_to_planner.py`.
+
 ## What we built
 
 `vector_to_planner.py` — a deterministic replacement for the vision step in

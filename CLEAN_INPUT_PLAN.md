@@ -1,5 +1,11 @@
 # Plan: Clean Input for the Floor Planner
 
+> ⚠️ **HISTORICAL — not the current tool.** This is the original planning doc for
+> moving off Claude vision toward deterministic vector extraction from PDFs. The
+> project ultimately went the **DXF route** (`dxf_to_planner.py`) and all PDF
+> code was removed. Kept for reference only; see [README.md](README.md) for the
+> current tool.
+
 ## TL;DR
 
 The accuracy problem is **not** that the input is a PDF. It's that the script
