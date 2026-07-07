@@ -8,7 +8,41 @@ Convert a PDF floor plan into [Landscape Forms Planner](https://landscapeforms.p
 2. Sends it to Claude claude-opus-4-8 to extract walls and boundaries as `BlueprintJSON`
 3. Opens the planner in your browser and auto-injects the floor plan
 
-## Requirements
+## DXF site plans (recommended, deterministic — no API key needed)
+
+If you have the site plan as a **DXF**, use [`dxf_to_planner.py`](dxf_to_planner.py)
+instead. It reads the real geometry and units directly — no vision model, no
+guessing, no Anthropic key. It's a single self-contained file; the only
+requirement is [uv](https://docs.astral.sh/uv/), which installs its dependency
+(ezdxf) automatically on first run.
+
+```bash
+# 1. See what layers/geometry the file contains:
+uv run dxf_to_planner.py "site.dxf" --list-layers
+
+# 2. Convert the boundary layer (copies an inject script to your clipboard):
+uv run dxf_to_planner.py "site.dxf" --layer L-SITE-CONC --simplify 100
+```
+
+Then open the [planner](https://landscapeforms.planneren.dev/?family=site-planner)
+in Chrome, press F12 → Console, paste (Ctrl/Cmd+V), Enter. (If Chrome blocks it,
+type `allow pasting` first.) The plan loads in the top-down Plan View.
+
+Useful flags:
+
+| Flag | What it does |
+|---|---|
+| `--list-layers` | List layers with entity types and closed-loop areas |
+| `--layer NAME` | Use only entities on this layer |
+| `--all-loops` | Keep every closed loop (default: just the largest) |
+| `--stitch` | Assemble open edges (line/arc) into closed loops |
+| `--units feet` | Override units if the DXF header is missing/wrong |
+| `--simplify 100` | Thin dense vertices (mm) → fewer dimension tags |
+| `--output out.json` | Also save the raw BlueprintJSON |
+
+Run `uv run dxf_to_planner.py --help` for the full list.
+
+## Requirements (PDF + vision path below)
 
 - [uv](https://docs.astral.sh/uv/) — Python package runner
 - An [Anthropic API key](https://console.anthropic.com/settings/api-keys)

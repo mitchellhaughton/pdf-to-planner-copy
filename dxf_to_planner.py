@@ -6,39 +6,55 @@
 # ]
 # ///
 """
-DXF → Landscape Forms Planner (deterministic, units-aware)
+DXF -> Landscape Forms Planner (deterministic, units-aware)
 
-Preferred input path when the drawing's author can hand us a DXF. Unlike the PDF
-route (vector_to_planner.py), a DXF carries:
-  - real-world UNITS, so scale is read, not guessed; and
-  - the site boundary as a single CLOSED polyline, so there's no stitching.
+Convert a DXF site plan into the Landscape Forms Planner
+(https://landscapeforms.planneren.dev/?family=site-planner). A DXF carries
+real-world UNITS, so scale is read rather than guessed, and boundaries come as
+polylines we turn directly into the planner's floor regions.
 
-Usage:
-  uv run dxf_to_planner.py "site.dxf" --list-layers     # inspect layers first
-  uv run dxf_to_planner.py "site.dxf"                    # auto: largest closed loop
-  uv run dxf_to_planner.py "site.dxf" --layer L-SITE-CONC  # only entities on a layer
-  uv run dxf_to_planner.py "site.dxf" --all-loops        # every closed polyline
-  uv run dxf_to_planner.py "site.dxf" --stitch           # assemble open edges into loops
-  uv run dxf_to_planner.py "site.dxf" --units feet       # override units
+This is a single self-contained script. The only requirement is `uv`
+(https://docs.astral.sh/uv/); it installs its own dependency (ezdxf) on first
+run — no virtualenv or pip needed.
 
-Outputs the same BlueprintJSON + console-inject script as the PDF tool, reusing
-its inject/clipboard/browser plumbing.
+QUICK START
+  1. uv run dxf_to_planner.py "site.dxf" --list-layers    # see what's inside
+  2. uv run dxf_to_planner.py "site.dxf" --layer <NAME>   # pick the boundary layer
+  3. The inject script is copied to your clipboard. Open the planner in Chrome,
+     press F12 -> Console, paste (Ctrl/Cmd+V), Enter. (If Chrome blocks it, type
+     "allow pasting" first.) The plan loads in the top-down Plan View.
 
-Validated on synthetic + real DXFs (feet/inch/mm/m, polyline/spline/circle).
-Real architectural files often XREF the survey/boundary into separate files, so
-an exported DXF may only contain the host drawing's own geometry — run
---list-layers first to see what's actually present.
+COMMON OPTIONS
+  --list-layers        List layers with entity types + closed-loop areas (m2).
+  --layer NAME         Use only entities on this layer (e.g. the boundary layer).
+  --all-loops          Keep every closed loop (default: just the largest).
+  --stitch             Assemble OPEN edges (LINE/ARC/open polylines) into closed
+                       loops -- use when a boundary is stored as separate pieces.
+  --units feet         Override units if the DXF's header is missing/wrong.
+  --simplify 100       Thin dense arc/vertex runs (Douglas-Peucker, mm of
+                       deviation) so the planner shows fewer dimension tags.
+  --min-area SQM       Drop closed loops smaller than this (noise filter).
+  --output out.json    Also save the raw BlueprintJSON.
+  --no-browser         Don't open the planner URL automatically.
+
+NOTES
+  - Real architectural files often XREF the survey/boundary into separate files,
+    so an export may only contain the host drawing's own geometry. Run
+    --list-layers first; if the boundary layer is empty, ask for a DXF with
+    XREFs bound/flattened.
+  - Coordinates map to the planner's ground plane (three.js: Y up, ground = X-Z)
+    and are flipped so the plan isn't mirrored top-to-bottom.
 """
 
 import argparse
+import json
 import math
 import os
+import subprocess
 import sys
 import webbrowser
 
-# Reuse the planner-facing machinery from the PDF tool. Its `import fitz` is lazy
-# (inside functions), so importing these does NOT require pymupdf to be present.
-from vector_to_planner import build_inject_script, copy_to_clipboard, PLANNER_URL
+PLANNER_URL = "https://landscapeforms.planneren.dev/?family=site-planner"
 
 # Planner uses three.js convention: Y is UP, the ground plane is X-Z. Keep the
 # floor flat by holding Y at a small constant (matches the planner's presets).
@@ -378,6 +394,60 @@ def list_layers(doc, meters_per_unit: float, flatten_tol_units: float):
         print(f"{lay:<24} {types[:34]:<34} {areas_str}")
 
 
+def build_inject_script(blueprint: dict) -> str:
+    """Wrap the blueprint in a browser-console snippet that loads it into the
+    planner and switches to the top-down Plan View."""
+    bp_json = json.dumps(blueprint)
+    return f"""(function() {{
+  var bp = {bp_json};
+  function clickBtn(label) {{
+    var b = Array.from(document.querySelectorAll('button')).find(function(x) {{
+      return x.textContent.trim() === label;
+    }});
+    if (b) {{ b.click(); return true; }}
+    return false;
+  }}
+  window.planner.blueprint.fromJSON(bp);
+  window.planner.blueprint.render();
+  setTimeout(function() {{
+    if (!clickBtn('Plan View')) {{
+      console.warn('Could not find "Plan View" button — rendering in current view');
+    }}
+    setTimeout(function() {{
+      window.planner.blueprint.fromJSON(bp);
+      window.planner.engine.forceRender();
+      console.log('Blueprint loaded: ' + bp.lines.length + ' lines, ' + bp.floor.length + ' floor regions');
+    }}, 500);
+  }}, 1000);
+}})();"""
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """Copy text to the OS clipboard. Tries Windows, macOS, then Linux tools;
+    returns False if none are available (the caller then prints the script)."""
+    # Windows
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["clip"], input=text.encode("utf-16"), check=True)
+            return True
+        except Exception:
+            return False
+    # macOS
+    try:
+        subprocess.run(["pbcopy"], input=text.encode(), check=True)
+        return True
+    except Exception:
+        pass
+    # Linux (Wayland then X11)
+    for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]):
+        try:
+            subprocess.run(cmd, input=text.encode(), check=True)
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser(description="Convert a DXF site plan to Landscape Forms Planner")
     ap.add_argument("dxf_path", help="Path to the DXF file")
@@ -472,7 +542,6 @@ def main():
     blueprint = build_blueprint_from_loops(loops, meters_per_unit)
 
     if args.output:
-        import json
         with open(args.output, "w") as f:
             json.dump(blueprint, f, indent=2)
         print(f"Saved BlueprintJSON to {args.output}")
