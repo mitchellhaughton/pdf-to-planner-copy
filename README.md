@@ -12,6 +12,36 @@ automatically on first run.
 
 ## Usage
 
+### First time only: install uv
+
+`uv` is what runs the script (it handles Python and the `ezdxf` dependency for
+you). Install it once:
+
+- **Windows** (PowerShell):
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+- **macOS / Linux**:
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+Close and reopen your terminal afterward so `uv` is on your PATH. Verify with
+`uv --version`.
+
+### Running it
+
+The two lines below are **terminal commands**. Open a terminal — **PowerShell**
+on Windows, **Terminal** on macOS/Linux — then `cd` into the folder that
+contains `dxf_to_planner.py` (the same folder you downloaded it to):
+
+```bash
+cd path/to/folder-with-the-script
+```
+
+Now run the two steps, replacing `"site.dxf"` with the path to your own DXF
+(quotes matter if the path has spaces):
+
 ```bash
 # 1. See what layers/geometry the file contains:
 uv run dxf_to_planner.py "site.dxf" --list-layers
@@ -20,10 +50,21 @@ uv run dxf_to_planner.py "site.dxf" --list-layers
 uv run dxf_to_planner.py "site.dxf" --layer L-SITE-CONC --simplify 100
 ```
 
-Then open the [planner](https://landscapeforms.planneren.dev/?family=site-planner)
-in Chrome, press **F12 → Console**, paste (Ctrl/Cmd+V), and press Enter. (If
-Chrome blocks the paste, type `allow pasting` first.) The plan loads in the
-top-down Plan View.
+- **Step 1** prints the layers in the file — find the one holding the site
+  boundary and use its name in step 2 (here, `L-SITE-CONC`).
+- **Step 2** builds the geometry and **copies an inject script to your
+  clipboard**. (The first run may take a few seconds while `uv` downloads
+  `ezdxf`.)
+
+Then load it into the planner:
+
+1. Open the [planner](https://landscapeforms.planneren.dev/?family=site-planner)
+   in Chrome.
+2. Press **F12** to open DevTools, and click the **Console** tab.
+3. Click in the console, **paste** (Ctrl/Cmd+V), and press **Enter**. (If Chrome
+   blocks the paste, type `allow pasting` and Enter first, then paste again.)
+
+The plan loads in the top-down Plan View.
 
 ## Options
 
